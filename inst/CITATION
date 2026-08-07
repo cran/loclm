@@ -1,0 +1,9 @@
+bibentry(
+  bibtype = "Misc",
+  title = "Package \'loclm\' for Local Linear Regression",
+  author = "J. C. Rougier",
+  year = "2026",
+  note = "R package version 1.0.0",
+  url = "https://CRAN.R-project.org/package=loclm",
+  textVersion = "Rougier, J.C. (2026), Package \'loclm\' for Local Linear Regression. Version 1.0.0, url=https://CRAN.R-project.org/package=loclm."
+)
