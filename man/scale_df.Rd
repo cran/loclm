@@ -20,6 +20,8 @@ A dataframe like \code{x}, with numeric columns centered and/or scaled.  The num
 Only rescale the numeric variables in a dataframe.
 
 \emph{Warning:} does not retain the default functionality of \code{base::scale()}, because the returned object is always a dataframe.  If \code{base::scale()} is called with a dataframe it will convert the returned object into a matrix.
+
+INCLUDED FOR BACK COMPATIBILITY.  NO LONGER USED IN \code{\link[=loclm]{loclm()}}.
 }
 \details{
 If \code{center} is numeric, \code{names(center)} identifies the numeric columns in \code{x}.  Otherwise, if \code{scale} is numeric, \code{names(scale)} identifies the numeric columns in \code{x}.  \code{center} and \code{scale} are passed to \code{\link[base:scale]{base::scale()}}.

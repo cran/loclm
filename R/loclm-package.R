@@ -11,5 +11,6 @@
 #' @importFrom stats na.pass
 #' @importFrom stats quantile
 #' @importFrom stats terms
+#' @importFrom stats sd
 ## usethis namespace: end
 NULL

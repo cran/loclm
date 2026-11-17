@@ -15,14 +15,18 @@ hatvalues.loclm <- function(model, ...) {
   if (!inherits(model, "loclm")) {
     stop("argument must have S3 class \"loclm\"")
   }
-  x <- model.matrix(terms(model$x), model$x)
+  M <- model$m
+  y <- model$y
+  N <- length(y)
+  jj <- rep(1:ncol(M), each = N)
   span <- model$span
-  rm(model)
-  N <- nrow(x)
-  d <- ncol(x) # includes intercept
-  span <- max(span, (1 + d) / N)
+  span_min <- (1 + ncol(M)) / N
+  span <- max(span, span_min)
+  rm(model); gc()
+  d <- ncol(M)
   vapply(1:N, \(i) {
-    dd <- sqrt(rowSums(sweep(x, 2L, x[i, ], "-")^2))
+    v <- M[i, ]
+    dd <- sqrt(rowSums((M - v[jj])^2))
     h <- if (span <= 1) {
       quantile(dd, probs = span, names = FALSE)
     } else {
@@ -31,8 +35,8 @@ hatvalues.loclm <- function(model, ...) {
     keep <- which(dd <= h)
     Qf <- qr.Q(qr(
       sqrt((1 - (dd[keep] / h)^3)^3) *
-      x[keep, , drop=FALSE]
-    ))[, 1:d, drop=FALSE]
+      cbind(1, M[keep, , drop=FALSE])
+    ))[, 1:(d+1), drop=FALSE]
     sum(Qf[keep == i, ]^2)
-  }, FUN.VALUE = 0)
+  }, FUN.VALUE = double(1L))
 }

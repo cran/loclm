@@ -4,6 +4,8 @@
 #'
 #' \emph{Warning:} does not retain the default functionality of `base::scale()`, because the returned object is always a dataframe.  If `base::scale()` is called with a dataframe it will convert the returned object into a matrix.
 #'
+#' INCLUDED FOR BACK COMPATIBILITY.  NO LONGER USED IN [loclm()].
+#'
 #' @param x Dataframe.
 #' @param center Either a logical value or a numeric vector of length equal to the number of numeric columns of `x`.
 #' @param scale Either a logical value or a numeric vector of length equal to the number of numeric columns of `x`.

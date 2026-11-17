@@ -16,13 +16,21 @@
 #'
 #' The behaviour with missing values can be complicated, and therefore only complete cases are used, see [complete.cases()].
 #'
-#' One edge case is where a variable is a constant: scaling creates a variable of `NA`s.  These variables are removed with a warning, and will be ignored in the prediction.
-#'
 #' @section Quadratic regression: Modifying the code to use quadratic regression is fairly straightforward: the main difference is that the model matrix is not longer the same as the data matrix.  However, there can be a lot of extra terms, especially when including factors with more than two levels.  This creates a prediction with low bias but high variance, especially for extrapolation.  For four or fewer numeric variables, use [stats::loess()] with `degree = 2` (the default).  Otherwise, change the code at your own risk.
+#'
+#' @section Parallel implementation: `predict.loclm()` uses [future.apply::future_vapply()] under the hood.  The default is sequential (one core).  If `newdata` has many rows it will be faster to use multiple cores using
+#'```
+#' plan(multisession)
+#'```
+#' before calling `predict.loclm()`.  See the vignette for an example, and [future::plan()] for more details about setting up a plan.
 #'
 #' @seealso [stats::loess()] is faster and more flexible. However, this function can only handle up to four variables, all numeric.
 #'
+#' [LOO_loclm()] for leave-one-out cross-validation to set `span`.
+#'
 #' [hatvalues.loclm()] calculates hat values.
+#'
+#' [x2m()] creates the model matrix (not including the constant).  This is a faster version than working through [model.matrix()].
 #'
 #' @returns A list with S3 class `"loclm"`. This has a `predict()` method which returns a numeric vector of point predictions for the rows of `newdata`.
 #'
@@ -41,8 +49,8 @@
 #' newd <- data.frame(speed = seq(5, 30, 1))
 #' yhat <- predict(fit, newd)
 #' cex <- 0.5
-#' plot(cars$speed, residuals(fit), pch = 19, cex = cex,
-#'   main = "Residual plot")
+#' plot(newd$speed, yhat, pch = 19, cex = cex, xlab = "Speed",
+#'   ylab = "Predicted distance", main = "Cars dataset")
 #'
 #' ## stackloss data
 #'
@@ -50,7 +58,8 @@
 #' y <- stack.loss
 #' fit <- loclm(x, y, span = 0.5)
 #' yhat <- fitted(fit)
-#' plot(y, yhat, pch = 19, cex = 0.8, xlab = "Actual",
+#' cex <- 0.8
+#' plot(y, yhat, pch = 19, cex = cex, xlab = "Actual",
 #'   ylab = "Predicted", main = "Stackloss dataset", asp = 1)
 #' abline(a = 0, b = 1, lty = 2)
 #'
@@ -61,7 +70,7 @@
 #' y <- y + as.numeric(x$ferret)
 #'
 #' fit <- loclm(x, y, span = 0.5)
-#' show(head(fit$x)) # now with ferret!
+#' show(head(fit$m)) # now with ferret!
 #' yhat <- fitted(fit)
 #' plot(y, yhat, pch = 19, cex = 0.8, xlab = "Actual",
 #'   ylab = "Predicted", main = "Stackloss dataset, with ferret",
@@ -76,6 +85,11 @@
 #' infl0 <- hatvalues(fit0)
 #' show(sum(infl0)) # 6 parameters
 #'
+#' ## compare with linear model
+#'
+#' fit1 <- lm(y ~ ., data.frame(x, y = y))
+#' infl1 <- hatvalues(fit1)
+#' all.equal(infl0, infl1, check.attributes = FALSE) # TRUE
 #' \donttest{
 #' ## some timings
 #'
@@ -86,30 +100,18 @@
 #'   fit <- loclm(big.x, big.y)
 #'   yhat <- predict(fit, big.x)
 #' }) # about 2s
+#'
+#' # see the vignette for parallel predict
 #' }
 #'
 #' @name loclm
 #' @rdname loclm
 #' @export
 loclm <- function(x, y, span = 0.75) {
+
   x <- as.data.frame(x, stringsAsFactors = TRUE)
   stopifnot(is.numeric(y), length(y) == nrow(x),
     is.scalar(span), span > 0)
-
-  ## don't want constants
-
-  drop <- lengths(lapply(x, unique)) == 1L
-  if (any(drop)) {
-    drop <- names(which(drop))
-    warning("dropping constant columns, ", paste(drop, collapse = ", "))
-    x <- x[, -match(drop, names(x)), drop=FALSE]
-  } else drop <- NULL
-
-  ## want at least one numeric variable
-
-  if (!any(sapply(x, is.numeric))) {
-    stop("\'x\' must contain at least one numeric variable.")
-  }
 
   ## complete cases only
 
@@ -121,17 +123,12 @@ loclm <- function(x, y, span = 0.75) {
     y <- y[cc]
   }
 
-  ## OK: check, scale, return
+  ## replace x with model matrix and return
 
-  stopifnot(nrow(x) >= 2L + ncol(x)) # must have >= 1 df
-  x <- scale_df(x) # only the numeric columns
-  scale <- list(center = attr(x, "scaled:center"),
-    scale = attr(x, "scaled:scale"))
-  attr(x, "scaled:center") <- attr(x, "scaled:scale") <- NULL
-  x <- model.frame(~ ., data = x)
+  m <- x2m(x)
+  sc <- attr(m, "scale")
   structure(
-    list(x = x, y = as.vector(y), drop = drop, scale = scale,
-      span = span),
+    list(m = m, y = as.vector(y), scale = sc, span = span),
     class = c("loclm", "list"))
 }
 
@@ -141,42 +138,46 @@ predict.loclm <- function(object, newdata, ...) {
   if (!inherits(object, "loclm")) {
     stop("first argument must be a \'loclm\' object")
   }
-  if (!missing(newdata)) {
-    newdata <- na.fail(as.data.frame(newdata, stringsAsFactors = TRUE))
-    newdata <- tryCatch(
-      {
-        if (!is.null(object$drop)) {
-          newdata <- newdata[, -match(object$drop, names(newdata)), drop=FALSE]
-        }
-        df <- with(object$scale,
-          scale_df(newdata, center = center, scale = scale))
-        model.matrix(terms(object$x), df)
-      },
-      error = function(cnd) {
-        stop("in predict(), incompatible \'newdata\'", call. = FALSE)
-      }
-    )
-  }
-  object$x <- model.matrix(terms(object$x), object$x)
-  if (missing(newdata)) newdata <- object$x
-
-  span <- max(object$span, (1 + ncol(object$x)) / nrow(object$x))
-  apply(newdata, 1L, function(v) {
-    dd <- sqrt(rowSums(sweep(object$x, 2L, v, "-")^2))
-    h <- if (span <= 1) {
-      quantile(dd, probs = span, names = FALSE)
-    } else {
-      span * max(dd)
+  if (missing(newdata)) {
+    newM <- object$m
+  } else {
+    newdata <- as.data.frame(newdata, stringsAsFactors = TRUE)
+    if (anyNA(newdata)) {
+      stop("NAs in \'newdata\'")
     }
-    keep <- which(dd <= h)
-    coff <- lm.wfit(
-      x = object$x[keep, , drop=FALSE],
-      y = object$y[keep],
-      w = (1 - (dd[keep] / h)^3)^3 # tricube
-    )$coefficients
-    coff[is.na(coff)] <- 0 # trouble with dummies
-    sum(coff * v)
-  })
+    newM <- try(x2m(newdata, object$scale), silent = TRUE)
+    if (inherits(newM, "try-error")) {
+      stop("cannot scale \'newdata\' using \'object$scale\'")
+    }
+  }
+
+  M <- object$m
+  y <- object$y
+  n <- length(y)
+  jj <- rep(1:ncol(M), each = n)
+  span <- object$span
+  span_min <- (1 + ncol(M)) / n
+  span <- max(span, span_min)
+  rm(object); gc() # little tidy up ahead of possible forking
+  future.apply::future_vapply(
+    X = 1:nrow(newM),
+    FUN = \(i) {
+      v <- newM[i, ]
+      dd <- sqrt(rowSums((M - v[jj])^2)) # like sweep() but faster
+      h <- if (span <= 1) {
+        quantile(dd, probs = span, names = FALSE)
+      } else {
+        span * max(dd)
+      }
+      keep <- which(dd <= h)
+      coff <- lm.wfit(
+        x = cbind(1, M[keep, , drop=FALSE]), # add constant
+        y = y[keep],
+        w = (1 - (dd[keep] / h)^3)^3 # tricube
+      )$coefficients
+      sum(coff * c(1, v), na.rm = TRUE) # trouble with dummies
+    }, FUN.VALUE = double(1L)
+  )
 }
 
 #' @rdname loclm

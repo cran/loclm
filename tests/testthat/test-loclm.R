@@ -3,7 +3,7 @@
 test_that("loclm() works", {
 
 expect_num <- function(x, n) {
-  if (typeof(x) %notin% c("integer", "double") || length(x) != n) {
+  if (!(typeof(x) %in% c("integer", "double")) || length(x) != n) {
     fail(
       sprintf("Expected numeric of length %i", n),
       sprintf("Actual is %s of length %s", typeof(x),
@@ -37,14 +37,7 @@ x <- as.data.frame(stack.x)
 x$ferret <- factor(rep(LETTERS[1:3], length.out = nrow(x)))
 y <- stack.loss + as.numeric(x$ferret)
 expect_s3_class(fit <- loclm(x, y), "loclm")
-expect_error(yhat <- predict(fit, z))
 z <- x[sample.int(5, 5), ]
-expect_num(yhat <- predict(fit, z), 5)
-
-## check it still works if character
-
-x$ferret <- as.character(x$ferret)
-expect_s3_class(fit <- loclm(x, y), "loclm")
 expect_num(yhat <- predict(fit, z), 5)
 
 ## hat values, span = Inf
@@ -59,8 +52,7 @@ expect_equal(sum(infl0), 6)
 
 x$const <- 12.3
 z$const <- 12.5
-expect_warning(fit <- loclm(x, y))
-expect_s3_class(fit, "loclm")
+expect_s3_class(fit <- loclm(x, y), "loclm")
 expect_num(yhat <- predict(fit, z), 5)
 
 ## error if z incompatible with x
@@ -68,16 +60,10 @@ expect_num(yhat <- predict(fit, z), 5)
 z$Acid.Conc. <- NULL
 expect_error(predict(fit, z))
 
-## error if no numeric variables
+## LOO analysis
 
-n <- 11
-x <- data.frame(
-  foo = sample(LETTERS[1:3], n, replace = TRUE),
-  bar = sample(letters[1:2], n, replace = TRUE))
-y <- rnorm(n)
-expect_error(fit <- loclm(x, y))
-
-x$mif <- rexp(11)
-expect_s3_class(fit <- loclm(x, y), "loclm")
+loo <- LOO_loclm(fit)
+loo1 <- LOO_loclm(fit, span = 0.3)
+expect_warning(LOO_loclm(fit, span = 0.1))
 
 })

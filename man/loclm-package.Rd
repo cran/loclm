@@ -5,7 +5,7 @@
 \alias{loclm-package}
 \title{loclm: Local Linear Regression}
 \description{
-A bare-bones implementation of local linear regression, using high-level functions. Can handle several regressors, both numerical and non-numerical. See Loader (1999) \doi{10.1007/b98858}, ch2, or Hastie et al (2009) \doi{10.1007/978-0-387-84858-7}, ch6. The package also contains a scale_df() function which only scales the numeric variables in a dataframe.
+A bare-bones implementation of local linear regression, using high-level functions. Can handle both numerical and non-numerical (factor) variables. See Loader (1999) \doi{10.1007/b98858}, ch2, or Hastie et al (2009) \doi{10.1007/978-0-387-84858-7}, ch6. The package also contains a scale_df() function which only scales the numeric variables in a dataframe.
 }
 \author{
 \strong{Maintainer}: Jonathan Rougier \email{j.c.rougier@bristol.ac.uk} (\href{https://orcid.org/0000-0003-3072-7043}{ORCID})

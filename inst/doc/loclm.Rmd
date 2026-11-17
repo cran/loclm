@@ -30,7 +30,6 @@ show(packageVersion("loclm"))
 show(date())
 ```
 
-
 Here I'm just setting up a nicer plotting frame.
 
 ```{r setup1}
@@ -80,13 +79,26 @@ set.seed(1234) # for reproducibility, feel free to change
 
 d <- 3
 sigma <- 1
-X <- matrix(runif(d * 101), ncol = d)
+X <- matrix(runif(101 * d), ncol = d)
 y <- apply(X, 1, banana) + rnorm(nrow(X), sd = sigma)
 
 ## here's where we'll predict
 
-newX <- matrix(runif(d * 23), ncol = d)
+newX <- matrix(runif(23 * d), ncol = d)
 newy <- apply(newX, 1, banana) # leave off the noise
+```
+
+I have left the column-names of `X` and `newX` blank, and they will be
+assigned default values of `V1`, `V2`, and `V3` inside `loclm()` by
+`as.data.frame()`.  It would be be safer, though, to assign meaningful
+column-names.
+
+```{r colnames}
+## to assign column names
+
+# nms <- paste0("x", 1:ncol(X)) # or something else
+# colnames(X) <- nms
+# colnames(newX) <- nms
 ```
 
 #### All numeric inputs
@@ -102,57 +114,51 @@ cex <- 0.6
 col <- c("darkblue", "forestgreen")
 par(op)
 matplot(newX[, 2], cbind(newy, pp), pch = c(1, 2), cex = cex,
-  col = col,
+  col = col, xlab = "x[2]", ylab = "Actual/predicted",
   main = "Default span")
+legend("topleft", c("actual", "predicted"), pch = 1:2, col = col,
+  cex = par("cex.axis"), bty = "n")
 ```
 
 Not great.
 
 ## LOO cross-validation to set the span
 
-Now use Leave-One-Out (LOO) cross-validation to set the span.  We need a general-purpose LOO function.
-
-```{r LOO0}
-## LOO cross-validation
-
-LOO <- function(X, y, reg, ...) {
-  n <- length(y)
-  yhat <- vapply(seq.int(n), \(i) {
-    fit <- reg(X[-i, , drop=FALSE], y[-i], ...)
-    predict(fit, X[i, , drop=FALSE])
-  }, FUN.VALUE = 0)
-  list(yhat = yhat, res = y - yhat)
-}
-```
-
-Now call this with `loclm` as the regression method, and `span`
-as the parameter.
+Now use Leave-One-Out (LOO) cross-validation to set the span.  There is
+a bespoke function `LOO_loclm()`.  This always executes sequentially,
+so that it can be embedded inside a parallel call over multiple values
+of `span`.
 
 ```{r LOO1}
-## try different spans
+## try different spans, can be executed in parallel
 
-span_vals <- c(seq(0.1, 0.2, 0.01), 0.75)
-rmse <- vapply(span_vals, \(span) {
-    loo <- LOO(X, y, reg = loclm, span = span)
-    sqrt(mean(loo$res^2))
-  }, FUN.VALUE = 0)
+mc <- options("mc.cores")
+options(mc.cores = 2L) # or more
+
+span_vals <- c(seq(0.1, 0.2, 0.02), 0.75)
+rmse <- parallel::mclapply(span_vals, \(span) {
+    loo_resid <- LOO_loclm(fit, span = span)
+    sqrt(mean(loo_resid^2))
+  }) |> unlist()
 show(cbind(span = span_vals, rmse = rmse))
 spanhat <- span_vals[which.min(rmse)]
 show(c(span = spanhat))
 ```
 
-Try with the optimal span.
+The LOO RMSE has dropped from `r  prettyNum(rmse[span_vals == 0.75], digits = 3)` to `r prettyNum(rmse[span_vals == spanhat], digits = 3)`. Try predicting with the optimal span.
 
 ```{r LOO2}
 fit <- loclm(X, y, span = spanhat)
 pp <- predict(fit, newX)
 par(op)
 matplot(newX[, 2], cbind(newy, pp), pch = c(1, 2), cex = cex,
-  col = col,
+  col = col, xlab = "x[2]", ylab = "Actual/predicted",
   main = sprintf("span = %s (optimal)", format(spanhat)))
+legend("topleft", c("actual", "predicted"), pch = 1:2, col = col,
+  cex = par("cex.axis"), bty = "n")
 ```
 
-That's a big improvement.
+That's an improvement.
 
 ## Factor inputs
 
@@ -162,27 +168,84 @@ Let's make the first input into a factor.
 ## first input is a factor
 
 breaks <- seq(0, 1, 0.2)
-X <- data.frame(X)
-X[[1]] <- factor(LETTERS[cut(X[[1]], breaks)])
+X <- as.data.frame(X) # into a data.frame
+X[[1]] <- factor(LETTERS[cut(X[[1]], breaks)]) # five levels
 show(head(X, 10))
 
-newX <- data.frame(newX)
+newX <- as.data.frame(newX)
 newX[[1]] <- factor(LETTERS[cut(newX[[1]], breaks)])
+```
 
-## OK, here is the fit
+For fitting I should really retune the `span` value, but for speed
+let's just crack on.
+
+```{r factor1}
+## fit, don't bother to retune
 
 fit <- loclm(X, y, span = spanhat)
 pp <- predict(fit, newX)
 par(op)
 matplot(newX[, 2], cbind(newy, pp), pch = c(1, 2), cex = cex,
-  col = col,
+  col = col, xlab = "x[2]", ylab = "Actual/predicted",
   main = sprintf("First input is a factor"))
+legend("topleft", c("actual", "predicted"), pch = 1:2, col = col,
+  cex = par("cex.axis"), bty = "n")
 ```
 
 Not a disaster.
 
-```{R wrap-up}
+## Parallel implementation
+
+`predict.loclm()` is currently using `future.apply::future_vapply()`
+under the hood.  The default is sequential (one core).  If `newdata`
+has many rows it will be faster to use multiple cores.  The following code is not run, but the rough timings are written in the comments.
+
+
+```{r parallel, eval = FALSE}
+## parallel processing -- NOT RUN
+
+if (requireNamespace("future", quietly = TRUE)) {
+
+  big_newX <- do.call("rbind", rep(list(newX), 1E4))
+  show(dim(big_newX))
+  t1 <- system.time(pp1 <- predict(fit, big_newX))
+  show(t1) # 22 sec
+  
+  future::plan(future::multisession, workers = 2) # two cores
+  t2 <- system.time(pp2 <- predict(fit, big_newX))
+  show(t2) # 11 sec
+  all.equal(pp1, pp2) # TRUE
+  
+  future::plan(future::sequential) # single core
+}
+```
+See `future::plan()` for more details.
+
+## Hat values
+
+In R the generic function `hatvalues()` accesses the
+diagonal of the hat matrix, and therefore `sum(hatvalues(model))`
+is the effective number of parameters.  In local linear regression this
+depends on the `span`, with `span = Inf` being linear regression, when
+the number of parameters is the number of columns in the model matrix,
+which is one plus the number of variables if all variables are numeric.
+
+```{r hatvalues}
+## effective number of params
+
+npeff <- sum(hatvalues(fit))
+show(npeff)
+fit_inf <- loclm(X, y, span = Inf)
+np_inf <- sum(hatvalues(fit_inf))
+show(np_inf) # 7 (hopefully!)
+```
+The banana function is very non-linear, by construction.  For linear regression,
+`np_inf` should be seven, because `X` has a constant, a five-level
+factor (four dummy columns), and two numeric variables.`
+
+```{r wrap-up}
 ## reset the session
 
 par(oldpar)
+options(mc.cores = mc$mc.cores)
 ```

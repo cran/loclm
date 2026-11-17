@@ -4,14 +4,19 @@ S3method(fitted,loclm)
 S3method(hatvalues,loclm)
 S3method(predict,loclm)
 S3method(residuals,loclm)
+export(LOO_loclm)
 export(loclm)
 export(scale_df)
-importFrom(stats,complete.cases)
-importFrom(stats,hatvalues)
-importFrom(stats,lm.wfit)
-importFrom(stats,model.frame)
-importFrom(stats,model.matrix)
-importFrom(stats,na.fail)
-importFrom(stats,na.pass)
-importFrom(stats,quantile)
-importFrom(stats,terms)
+export(x2m)
+importFrom(stats,
+  complete.cases,
+  hatvalues,
+  lm.wfit,
+  model.frame,
+  model.matrix,
+  na.fail,
+  na.pass,
+  quantile,
+  sd,
+  terms
+)
